@@ -5,7 +5,7 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 
 # --- Config ---
-BOT_TOKEN = 'YOUR_BOT_TOKEN_HERE'
+BOT_TOKEN = '7808143510:AAFuwJvgVwc9lYh0Yr_xIWEaLscvRJ0ehVk'
 ADMIN_ID = 7660990923  # Replace with your Telegram ID for admin features
 
 # --- Setup Logging ---
