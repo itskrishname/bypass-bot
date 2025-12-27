@@ -16,42 +16,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     if "lksfy.com" in text:
-        # Extract URL
         import re
         url_match = re.search(r'(https?://lksfy\.com/[^\s]+)', text)
         if url_match:
             url = url_match.group(1)
-            await update.message.reply_text(f"Bypassing {url}... Please wait, this may take a moment.")
+            await update.message.reply_text(f"Bypassing {url}... Please wait, this may take several minutes as I solve multiple CAPTCHAs.")
 
-            # Run bypass in executor to avoid blocking async loop
-            # Bypasser creates a new session for each request, which is thread-safe enough here
             bypasser = LksfyBypasser()
+            # Run the hybrid bypass
+            final_url = await bypasser.run_hybrid_bypass(url)
 
-            # Since bypass is synchronous, we run it in a thread
-            loop =  context.application.loop if hasattr(context.application, 'loop') else __import__('asyncio').get_running_loop()
-            result_url = await loop.run_in_executor(None, bypasser.bypass, url)
-
-            if result_url:
+            if final_url:
                 response_message = (
                     f"┎ 🔗 Original Link :- {url}\n"
                     f"┃\n"
-                    f"┖ 🔓 Bypassed Link : {result_url}\n\n"
+                    f"┖ 🔓 Bypassed Link : {final_url}\n\n"
                     f"━━━━━━━✦✗✦━━━━━━━\n\n"
                     f"Requested By :- @{update.effective_user.username}"
                 )
                 await update.message.reply_text(response_message, disable_web_page_preview=True)
             else:
-                # If logs indicate CAPTCHA (we don't pass logs back, but checking None result)
-                # We could improve this by returning a status from bypass()
                 await update.message.reply_text("❌ Failed to bypass the link. It might be protected by a CAPTCHA or timed out.")
         else:
             await update.message.reply_text("Could not find a valid lksfy.com link.")
     else:
-        # Optional: ignore non-links or reply with help
         pass
 
 if __name__ == '__main__':
-    # Use environment variable for token
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
         raise ValueError("No BOT_TOKEN provided in environment variables.")
