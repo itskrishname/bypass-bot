@@ -41,7 +41,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 await update.message.reply_text(response_message, disable_web_page_preview=True)
             else:
-                await update.message.reply_text("❌ Failed to bypass the link. Please try again later.")
+                # If logs indicate CAPTCHA (we don't pass logs back, but checking None result)
+                # We could improve this by returning a status from bypass()
+                await update.message.reply_text("❌ Failed to bypass the link. It might be protected by a CAPTCHA or timed out.")
         else:
             await update.message.reply_text("Could not find a valid lksfy.com link.")
     else:
