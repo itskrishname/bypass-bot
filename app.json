@@ -1,0 +1,28 @@
+{
+  "name": "Bypass Bot",
+  "description": "A Telegram bot that bypasses lksfy.com links using Playwright.",
+  "stack": "container",
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Your Telegram Bot Token",
+      "required": true
+    },
+    "API_ID": {
+      "description": "Your Telegram API ID",
+      "required": true
+    },
+    "API_HASH": {
+      "description": "Your Telegram API Hash",
+      "required": true
+    },
+    "OWNER_ID": {
+      "description": "Your Telegram User ID",
+      "required": false
+    },
+    "PLAYWRIGHT_BROWSERS_PATH": {
+      "description": "Path to Playwright browsers",
+      "value": "/app/pw-browsers",
+      "required": false
+    }
+  }
+}
