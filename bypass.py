@@ -1,49 +1,44 @@
 import requests
-import re
-import base64
-import time
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+import time
 import logging
-from browser_solver import solve_with_browser
+import re
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class LksfyBypasser:
     def __init__(self):
         self.session = requests.Session()
-        self.user_agent = 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36'
         self.session.headers.update({
-            'User-Agent': self.user_agent,
+            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
             'Referer': 'https://lksfy.com/',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
             'Accept-Language': 'en-US,en;q=0.9',
         })
 
     def decode_base64(self, s):
+        import base64
         try:
             return base64.b64decode(s).decode('utf-8')
-        except Exception as e:
-            logger.error(f"Error decoding base64: {e}")
+        except:
             return None
 
-    def sync_bypass(self, url):
-        """
-        Runs the requests-based bypass loop.
-        Returns:
-          - Str: Final Telegram URL
-          - Dict: {"action": "browser_solve", "url": ...}
-          - None: Failure
-        """
+    def bypass(self, url):
         current_url = url
+        logger.info(f"Starting bypass for: {current_url}")
+
         max_steps = 150
 
         for step in range(max_steps):
             logger.info(f"Step {step}: Requesting {current_url}")
 
             try:
+                # Add slight delay to mimic human behavior
+                time.sleep(1)
                 response = self.session.get(current_url, allow_redirects=True, timeout=15)
+                # Important: Update referer
                 self.session.headers.update({'Referer': current_url})
             except Exception as e:
                 logger.error(f"Error requesting {current_url}: {e}")
@@ -55,22 +50,59 @@ class LksfyBypasser:
 
             content = response.text
 
-            tg_match = re.search(r'href=["\'](https://(?:telegram\.me|t\.me)/.*?)["\']', content)
-            if tg_match:
-                 logger.info(f"SUCCESS! Found Telegram link in content: {tg_match.group(1)}")
-                 return tg_match.group(1)
+            # Check if we are on the Turnstile/Form page
+            # Look for the form with id "go-link" as seen in archelaus script and my dumps
+            if 'id="go-link"' in content or 'class="go-link"' in content:
+                logger.info("Found go-link form. Attempting POST bypass...")
 
-            # Check for CAPTCHA
-            if "cf-turnstile" in content and "lksfy.com" in response.url:
-                 logger.info("Cloudflare Turnstile CAPTCHA detected.")
-                 return {
-                     "action": "browser_solve",
-                     "url": current_url,
-                     "cookies": self.session.cookies.get_dict(),
-                     "user_agent": self.user_agent
-                 }
+                bs4 = BeautifulSoup(content, 'lxml')
+                form = bs4.find('form', {'id': 'go-link'}) or bs4.find('form', {'class': 'go-link'})
 
-            # Redirects
+                if form:
+                    inputs = form.find_all('input')
+                    data = {input.get('name'): input.get('value') for input in inputs}
+
+                    # Add missing inputs if needed (alias?)
+                    if not data.get('alias'):
+                        alias_match = re.search(r"var alias = '(.*?)'", content)
+                        if alias_match:
+                            data['alias'] = alias_match.group(1)
+
+                    logger.info(f"Form Data: {data}")
+
+                    # Wait 10s as per archelaus script
+                    logger.info("Sleeping 10s...")
+                    time.sleep(10)
+
+                    post_url = f"https://lksfy.com/links/go"
+                    headers = {
+                        'x-requested-with': 'XMLHttpRequest',
+                        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8'
+                    }
+
+                    # Update session headers for this request
+                    # self.session.headers.update(headers)
+
+                    try:
+                        post_resp = self.session.post(post_url, data=data, headers=headers)
+                        logger.info(f"POST Response: {post_resp.status_code}")
+                        # logger.info(f"POST Content: {post_resp.text}")
+
+                        try:
+                            json_resp = post_resp.json()
+                            if json_resp.get('url'):
+                                logger.info(f"Got URL from JSON: {json_resp['url']}")
+                                return json_resp['url']
+                            elif json_resp.get('message'):
+                                logger.error(f"Error Message: {json_resp['message']}")
+                        except:
+                            pass
+                    except Exception as e:
+                        logger.error(f"POST failed: {e}")
+                else:
+                    logger.error("Could not find form element even though ID was found in text?")
+
+            # Standard redirect logic (JS, meta, etc)
             if "<script>window.location.href" in content and "tagrget_url" not in content:
                  match = re.search(r'window\.location\.href\s*=\s*["\'](.*?)["\']', content)
                  if match:
@@ -79,7 +111,6 @@ class LksfyBypasser:
                      continue
 
             target_match = re.search(r'var tagrget_url\s*=\s*["\'](.*?)["\']', content)
-
             if target_match:
                 encoded_url = target_match.group(1)
                 decoded_url = self.decode_base64(encoded_url)
@@ -104,63 +135,20 @@ class LksfyBypasser:
 
                     current_url = decoded_url
                     continue
-                else:
-                    logger.error("Failed to decode URL")
-                    break
             else:
                 if 'content="0;url=' in content:
                      meta_match = re.search(r'content=["\']\d+;url=(.*?)["\']', content)
                      if meta_match:
                          current_url = meta_match.group(1)
                          continue
-                break
 
-        return None
+                # If we are stuck on lksfy and didn't find the form
+                if "lksfy.com" in current_url:
+                     logger.warning("Stuck on lksfy.com without form?")
+                     # Maybe we need to wait/refresh?
+                     pass
 
-    async def run_hybrid_bypass(self, url):
-        """
-        Orchestrates the hybrid bypass (requests -> browser -> requests).
-        """
-        current_url = url
-
-        # Increased loop limit to handle multiple CAPTCHA checks
-        for loop_idx in range(50):
-            logger.info(f"Hybrid Loop {loop_idx}: Starting sync bypass...")
-
-            # 1. Run Sync Bypass
-            import asyncio
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, self.sync_bypass, current_url)
-
-            # 2. Check Result
-            if isinstance(result, str):
-                return result # Success!
-
-            if isinstance(result, dict) and result.get("action") == "browser_solve":
-                logger.info("Sync bypass hit CAPTCHA. Switching to Browser...")
-
-                # 3. Run Browser Solver
-                browser_result = await solve_with_browser(result["url"], result["cookies"], result["user_agent"])
-
-                if browser_result and browser_result.get("url"):
-                    new_url = browser_result["url"]
-                    logger.info(f"Browser returned new URL: {new_url}")
-
-                    if "telegram.me" in new_url or "t.me" in new_url:
-                        return new_url
-
-                    # Update cookies from browser back to session
-                    if browser_result.get("cookies"):
-                        for c in browser_result["cookies"]:
-                            self.session.cookies.set(c['name'], c['value'], domain=c['domain'], path=c['path'])
-
-                    current_url = new_url
-                    continue # Loop back to sync bypass
-                else:
-                    logger.error("Browser failed to solve CAPTCHA or find next link.")
-                    return None
-
-            logger.info("Sync bypass returned None or unknown state.")
-            return None
+                # If we are stuck elsewhere, break
+                # break
 
         return None
