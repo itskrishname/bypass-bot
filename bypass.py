@@ -15,6 +15,11 @@ async def solve_lksfy(url):
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+
+        # Block common AdBlock detection scripts
+        await context.route("**/*fundingchoicesmessages.google.com*", lambda route: route.abort())
+        await context.route("**/*adsbygoogle.js*", lambda route: route.abort())
+
         page = await context.new_page()
 
         try:
@@ -39,6 +44,47 @@ async def solve_lksfy(url):
                         await page.wait_for_timeout(5000)
                         continue
                 except: pass
+
+                # 1.1 Google Vignette Check
+                if "#google_vignette" in current_url:
+                    print("[*] Google Vignette detected. Attempting to dismiss...")
+                    try:
+                        # Try to find and click the dismiss button (usually in an iframe or shadow DOM, but often just a div with ID)
+                        # Common IDs/Selectors for Google Vignette dismiss
+                        dismissed = await page.evaluate('''() => {
+                            const closeBtn = document.getElementById('dismiss-button') || document.querySelector('[aria-label="Close ad"]');
+                            if (closeBtn) {
+                                closeBtn.click();
+                                return true;
+                            }
+                            // Sometimes it's inside an iframe, let's try to check frames from python side
+                            return false;
+                        }''')
+
+                        if not dismissed:
+                            # Try to click via frames
+                            for frame in page.frames:
+                                try:
+                                    if await frame.evaluate('''() => {
+                                        const btn = document.getElementById('dismiss-button') || document.querySelector('[aria-label="Close ad"]');
+                                        if(btn) { btn.click(); return true; }
+                                        return false;
+                                    }'''):
+                                        dismissed = True
+                                        break
+                                except: pass
+
+                        if dismissed:
+                            print("[*] Vignette dismissed.")
+                            await page.wait_for_timeout(2000) # Wait for animation
+                            continue
+                        else:
+                            print("[!] Could not find dismiss button. Reloading...")
+                            await page.reload()
+                            continue
+
+                    except Exception as e:
+                        print(f"[!] Error handling vignette: {e}")
 
                 # 2. Final Lksfy Page Logic
                 if "lksfy.com" in current_url:
@@ -78,10 +124,15 @@ async def solve_lksfy(url):
 
                 # 3. Blog Step Logic - Fast Path (Variable)
                 target = await page.evaluate('''() => {
-                    try { if (typeof tagrget_url !== 'undefined') return atob(tagrget_url); } catch(e) {}
+                    // Check for tagrget_url, target_url, or other variations
+                    const vars = ['tagrget_url', 'target_url', 'get_link', 'next_url'];
+                    for (let v of vars) {
+                        try { if (typeof window[v] !== 'undefined') return atob(window[v]); } catch(e) {}
+                    }
 
                     for (let s of document.querySelectorAll('script')) {
-                        let m = s.innerText.match(/tagrget_url\\s*=\\s*["']([^"']+)["']/);
+                        // Match variable assignment: var/let/const name = '...'
+                        let m = s.innerText.match(/(?:tagrget_url|target_url|get_link|next_url)\\s*=\\s*["']([^"']+)["']/);
                         if (m) return atob(m[1]);
                     }
                     return null;
@@ -119,7 +170,7 @@ async def solve_lksfy(url):
                             btn.style.visibility = 'visible';
                             btn.style.opacity = '1';
                             btn.click();
-                            return true;
+                            return "ID: bottomButton";
                         }
 
                         // Also try 'getting-link' or 'get-link'
@@ -127,14 +178,29 @@ async def solve_lksfy(url):
                         if(btn2) {
                             btn2.style.display = 'block';
                             btn2.click();
-                            return true;
+                            return "ID: " + btn2.id;
                         }
 
+                        // Try generic search by text
+                        const buttons = document.querySelectorAll('button, a.btn, div[role="button"], a');
+                        for (let b of buttons) {
+                            if (b.offsetParent !== null && b.innerText.trim().length > 0) {
+                                const t = b.innerText.toLowerCase();
+                                if (t.includes("get link") || t.includes("open link") || t.includes("continue") || t.includes("go to link") || t.includes("download") || t.includes("लिंक") || t.includes("click") || t.includes("here")) {
+                                    b.click();
+                                    return "Text: " + b.innerText;
+                                }
+                            }
+                        }
                         return false;
                     }''')
 
-                if await try_click_button():
-                    print("[*] Forced click on button. Waiting for timer/generation (10s)...")
+                # Scroll to bottom to trigger lazy loading
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+
+                clicked_btn = await try_click_button()
+                if clicked_btn:
+                    print(f"[*] Forced click on button ({clicked_btn}). Waiting for timer/generation (10s)...")
                     await page.wait_for_timeout(10000)
                 else:
                     # Try Frames
