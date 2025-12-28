@@ -21,5 +21,9 @@ RUN playwright install-deps chromium
 # Copy app code
 COPY . .
 
+# Copy start script
+COPY start.sh .
+RUN chmod +x start.sh
+
 # Run the bot
-CMD ["python", "bot.py"]
+CMD ["./start.sh"]
