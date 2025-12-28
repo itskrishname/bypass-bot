@@ -16,11 +16,15 @@ async def solve_lksfy(url):
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
 
-        # Block common AdBlock detection scripts
-        await context.route("**/*fundingchoicesmessages.google.com*", lambda route: route.abort())
-        await context.route("**/*adsbygoogle.js*", lambda route: route.abort())
+        # NOTE: Do NOT block ad scripts (fundingchoices, adsbygoogle) as the site detects this and blocks access.
+        # Instead, we handle the overlays/vignettes they generate.
 
         page = await context.new_page()
+
+        # Try to neutralize AdBlock detection early
+        await page.add_init_script('''
+            window.AdBDetected = function() { console.log("AdBlock detection neutralized"); };
+        ''')
 
         try:
             print(f"[*] Going to {url}")
@@ -158,6 +162,8 @@ async def solve_lksfy(url):
                 await page.evaluate('''() => {
                     const overlay = document.querySelector('.adb-overlay');
                     if(overlay) overlay.remove();
+                    const adbModel = document.getElementById('AdbModel');
+                    if(adbModel) adbModel.remove();
                 }''')
 
                 # Helper to find and click button
