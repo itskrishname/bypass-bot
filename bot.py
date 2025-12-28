@@ -20,7 +20,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url_match = re.search(r'(https?://lksfy\.com/[^\s]+)', text)
         if url_match:
             url = url_match.group(1)
-            await update.message.reply_text(f"Bypassing {url}... Please wait, this may take several minutes as I solve multiple CAPTCHAs.")
+            # Notify user about potential long wait times for complex chains
+            await update.message.reply_text(f"Bypassing {url}... \n\n⚠️ This link chain is known to be very long (20+ steps) and requires solving multiple CAPTCHAs. \n\n⏳ Please wait, this may take up to 10 minutes.")
 
             bypasser = LksfyBypasser()
             # Run the hybrid bypass
@@ -36,7 +37,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 await update.message.reply_text(response_message, disable_web_page_preview=True)
             else:
-                await update.message.reply_text("❌ Failed to bypass the link. It might be protected by a CAPTCHA or timed out.")
+                await update.message.reply_text("❌ Failed to bypass the link. It might be broken, looped, or timed out.")
         else:
             await update.message.reply_text("Could not find a valid lksfy.com link.")
     else:
