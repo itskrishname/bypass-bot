@@ -1,8 +1,9 @@
 import os
 import logging
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-from bypass import LksfyBypasser
+from bypass import solve_lksfy
 
 # Enable logging
 logging.basicConfig(
@@ -20,24 +21,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url_match = re.search(r'(https?://lksfy\.com/[^\s]+)', text)
         if url_match:
             url = url_match.group(1)
-            await update.message.reply_text(f"Bypassing {url}... Please wait.")
+            status_msg = await update.message.reply_text(f"Bypassing {url}... Please wait (approx 20-30s).")
 
-            bypasser = LksfyBypasser()
-            # Run the requests based bypass in thread
-            loop =  context.application.loop if hasattr(context.application, 'loop') else __import__('asyncio').get_running_loop()
-            final_url = await loop.run_in_executor(None, bypasser.bypass, url)
+            try:
+                # Call the async solver directly
+                final_url = await solve_lksfy(url)
 
-            if final_url:
-                response_message = (
-                    f"┎ 🔗 Original Link :- {url}\n"
-                    f"┃\n"
-                    f"┖ 🔓 Bypassed Link : {final_url}\n\n"
-                    f"━━━━━━━✦✗✦━━━━━━━\n\n"
-                    f"Requested By :- @{update.effective_user.username}"
-                )
-                await update.message.reply_text(response_message, disable_web_page_preview=True)
-            else:
-                await update.message.reply_text("❌ Failed to bypass the link.")
+                if final_url:
+                    response_message = (
+                        f"┎ 🔗 Original Link :- {url}\n"
+                        f"┃\n"
+                        f"┖ 🔓 Bypassed Link : {final_url}\n\n"
+                        f"━━━━━━━✦✗✦━━━━━━━\n\n"
+                        f"Requested By :- @{update.effective_user.username}"
+                    )
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=status_msg.message_id, text=response_message, disable_web_page_preview=True)
+                else:
+                    await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=status_msg.message_id, text="❌ Failed to bypass the link. Timed out or stuck.")
+            except Exception as e:
+                logging.error(f"Error bypassing: {e}")
+                await context.bot.edit_message_text(chat_id=update.effective_chat.id, message_id=status_msg.message_id, text=f"❌ Error: {str(e)}")
         else:
             await update.message.reply_text("Could not find a valid lksfy.com link.")
     else:
@@ -46,7 +49,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     TOKEN = os.environ.get("BOT_TOKEN")
     if not TOKEN:
-        raise ValueError("No BOT_TOKEN provided in environment variables.")
+        # Fallback for testing if env var not set, though it should be.
+        print("Warning: BOT_TOKEN not set.")
 
     application = ApplicationBuilder().token(TOKEN).build()
 

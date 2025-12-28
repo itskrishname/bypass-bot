@@ -1,154 +1,184 @@
-import requests
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-import time
-import logging
+import asyncio
+from playwright.async_api import async_playwright
+import base64
 import re
+import json
+from urllib.parse import urlparse
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+def new_url_domain(url):
+    return urlparse(url).netloc
 
-class LksfyBypasser:
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-            'Referer': 'https://lksfy.com/',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
-            'Accept-Language': 'en-US,en;q=0.9',
-        })
+async def solve_lksfy(url):
+    print(f"[*] Launching Browser for {url}")
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = await context.new_page()
 
-    def decode_base64(self, s):
-        import base64
         try:
-            return base64.b64decode(s).decode('utf-8')
-        except:
-            return None
+            print(f"[*] Going to {url}")
+            await page.goto(url)
 
-    def bypass(self, url):
-        current_url = url
-        logger.info(f"Starting bypass for: {current_url}")
-
-        max_steps = 150
-
-        for step in range(max_steps):
-            logger.info(f"Step {step}: Requesting {current_url}")
-
+            # Wait for initial load
             try:
-                # Add slight delay to mimic human behavior
-                time.sleep(1)
-                response = self.session.get(current_url, allow_redirects=True, timeout=15)
-                # Important: Update referer
-                self.session.headers.update({'Referer': current_url})
-            except Exception as e:
-                logger.error(f"Error requesting {current_url}: {e}")
-                return None
+                await page.wait_for_load_state("domcontentloaded")
+            except:
+                pass
 
-            if "telegram.me" in response.url or "t.me" in response.url:
-                logger.info(f"SUCCESS! Found Telegram link: {response.url}")
-                return response.url
+            max_steps = 30
+            for i in range(max_steps):
+                current_url = page.url
+                print(f"[{i}] Processing: {current_url}")
 
-            content = response.text
+                # 1. Cloudflare Check
+                try:
+                    if "Just a moment" in await page.title():
+                        print("[*] Cloudflare detected. Waiting...")
+                        await page.wait_for_timeout(5000)
+                        continue
+                except: pass
 
-            # Check if we are on the Turnstile/Form page
-            # Look for the form with id "go-link" as seen in archelaus script and my dumps
-            if 'id="go-link"' in content or 'class="go-link"' in content:
-                logger.info("Found go-link form. Attempting POST bypass...")
-
-                bs4 = BeautifulSoup(content, 'lxml')
-                form = bs4.find('form', {'id': 'go-link'}) or bs4.find('form', {'class': 'go-link'})
-
-                if form:
-                    inputs = form.find_all('input')
-                    data = {input.get('name'): input.get('value') for input in inputs}
-
-                    # Add missing inputs if needed (alias?)
-                    if not data.get('alias'):
-                        alias_match = re.search(r"var alias = '(.*?)'", content)
-                        if alias_match:
-                            data['alias'] = alias_match.group(1)
-
-                    logger.info(f"Form Data: {data}")
-
-                    # Wait 10s as per archelaus script
-                    logger.info("Sleeping 10s...")
-                    time.sleep(10)
-
-                    post_url = f"https://lksfy.com/links/go"
-                    headers = {
-                        'x-requested-with': 'XMLHttpRequest',
-                        'content-type': 'application/x-www-form-urlencoded; charset=UTF-8'
-                    }
-
-                    # Update session headers for this request
-                    # self.session.headers.update(headers)
-
-                    try:
-                        post_resp = self.session.post(post_url, data=data, headers=headers)
-                        logger.info(f"POST Response: {post_resp.status_code}")
-                        # logger.info(f"POST Content: {post_resp.text}")
-
-                        try:
-                            json_resp = post_resp.json()
-                            if json_resp.get('url'):
-                                logger.info(f"Got URL from JSON: {json_resp['url']}")
-                                return json_resp['url']
-                            elif json_resp.get('message'):
-                                logger.error(f"Error Message: {json_resp['message']}")
-                        except:
-                            pass
-                    except Exception as e:
-                        logger.error(f"POST failed: {e}")
-                else:
-                    logger.error("Could not find form element even though ID was found in text?")
-
-            # Standard redirect logic (JS, meta, etc)
-            if "<script>window.location.href" in content and "tagrget_url" not in content:
-                 match = re.search(r'window\.location\.href\s*=\s*["\'](.*?)["\']', content)
-                 if match:
-                     next_url = match.group(1)
-                     current_url = next_url
-                     continue
-
-            target_match = re.search(r'var tagrget_url\s*=\s*["\'](.*?)["\']', content)
-            if target_match:
-                encoded_url = target_match.group(1)
-                decoded_url = self.decode_base64(encoded_url)
-                logger.info(f"Found tagrget_url: {encoded_url} -> {decoded_url}")
-
-                if decoded_url:
-                    if 'document.cookie = "user_step=;' in content:
-                        try:
-                            domain = urlparse(current_url).netloc
-                            self.session.cookies.clear(domain=domain, path='/', name='user_step')
-                            if 'user_step' in self.session.cookies:
-                                del self.session.cookies['user_step']
-                        except:
-                            pass
-
-                    cookie_match = re.search(r'setCookiee\s*\(\s*["\'](.*?)["\']\s*,\s*["\'](.*?)["\']', content)
-                    if cookie_match:
-                        cookie_name = cookie_match.group(1)
-                        cookie_value = cookie_match.group(2)
-                        domain = urlparse(current_url).netloc
-                        self.session.cookies.set(cookie_name, cookie_value, domain=domain)
-
-                    current_url = decoded_url
-                    continue
-            else:
-                if 'content="0;url=' in content:
-                     meta_match = re.search(r'content=["\']\d+;url=(.*?)["\']', content)
-                     if meta_match:
-                         current_url = meta_match.group(1)
-                         continue
-
-                # If we are stuck on lksfy and didn't find the form
+                # 2. Final Lksfy Page Logic
                 if "lksfy.com" in current_url:
-                     logger.warning("Stuck on lksfy.com without form?")
-                     # Maybe we need to wait/refresh?
-                     pass
+                    print("[*] On Lksfy Page.")
+                    try:
+                        try:
+                            await page.wait_for_selector('#go-link', timeout=5000)
+                        except:
+                            pass
 
-                # If we are stuck elsewhere, break
-                # break
+                        inputs = await page.evaluate('''() => {
+                            const form = document.getElementById('go-link');
+                            if (!form) return null;
+                            const inputs = form.querySelectorAll('input');
+                            const data = {};
+                            inputs.forEach(input => { data[input.name] = input.value; });
+                            return data;
+                        }''')
 
-        return None
+                        if inputs:
+                            print(f"[*] Extracted Form Data: {inputs}")
+                            resp = await context.request.post("https://lksfy.com/links/go",
+                                form=inputs,
+                                headers={"X-Requested-With": "XMLHttpRequest", "Content-Type": "application/x-www-form-urlencoded"}
+                            )
+                            text = await resp.text()
+                            try:
+                                j = json.loads(text)
+                                if 'url' in j:
+                                    print(f"SUCCESS_URL: {j['url']}")
+                                    return j['url']
+                            except:
+                                pass
+                            return None
+                    except Exception as e:
+                        print(f"[!] Lksfy Error: {e}")
+
+                # 3. Blog Step Logic - Fast Path (Variable)
+                target = await page.evaluate('''() => {
+                    try { if (typeof tagrget_url !== 'undefined') return atob(tagrget_url); } catch(e) {}
+
+                    for (let s of document.querySelectorAll('script')) {
+                        let m = s.innerText.match(/tagrget_url\\s*=\\s*["']([^"']+)["']/);
+                        if (m) return atob(m[1]);
+                    }
+                    return null;
+                }''')
+
+                if target:
+                    print(f"[*] Found Target: {target}")
+                    # Apply Cookie Hack
+                    step_text = await page.evaluate("() => document.querySelector('.tag') ? document.querySelector('.tag').innerText : ''")
+                    if step_text:
+                        m = re.search(r'Step\s*(\d+)', step_text)
+                        if m:
+                            step = m.group(1)
+                            print(f"[*] Setting user_step={step}")
+                            await context.add_cookies([{'name': 'user_step', 'value': step, 'domain': new_url_domain(current_url), 'path': '/'}])
+                    await page.goto(target)
+                    continue
+
+                # 4. Final Step Logic (Force Button Click)
+                print("[*] No target variable found. Scanning frames/buttons...")
+
+                # Check for Overlay and Close it
+                await page.evaluate('''() => {
+                    const overlay = document.querySelector('.adb-overlay');
+                    if(overlay) overlay.remove();
+                }''')
+
+                # Helper to find and click button
+                async def try_click_button():
+                    return await page.evaluate('''() => {
+                        // Force show and click bottomButton
+                        const btn = document.getElementById('bottomButton');
+                        if (btn) {
+                            btn.style.display = 'block';
+                            btn.style.visibility = 'visible';
+                            btn.style.opacity = '1';
+                            btn.click();
+                            return true;
+                        }
+
+                        // Also try 'getting-link' or 'get-link'
+                        const btn2 = document.getElementById('getting-link') || document.getElementById('get-link') || document.getElementById('glink');
+                        if(btn2) {
+                            btn2.style.display = 'block';
+                            btn2.click();
+                            return true;
+                        }
+
+                        return false;
+                    }''')
+
+                if await try_click_button():
+                    print("[*] Forced click on button. Waiting for timer/generation (10s)...")
+                    await page.wait_for_timeout(10000)
+                else:
+                    # Try Frames
+                    for frame in page.frames:
+                        try:
+                            if await frame.evaluate('''() => {
+                                const btn = document.getElementById('bottomButton') || document.getElementById('getting-link') || document.getElementById('get-link');
+                                if(btn) { btn.click(); return true; }
+                                return false;
+                            }'''):
+                                print("[*] Clicked button in frame!")
+                                await page.wait_for_timeout(10000)
+                                break
+                        except: pass
+
+                # Check for generated link
+                generated_link = await page.evaluate('''() => {
+                    const a = document.getElementById('open-link');
+                    if (a) return a.href;
+
+                    const btn = document.getElementById('bottomButton');
+                    if (btn && btn.parentElement.tagName === 'A') return btn.parentElement.href;
+
+                    for (let l of document.querySelectorAll('a')) {
+                        if (l.href.includes('lksfy.com')) return l.href;
+                    }
+                    return null;
+                }''')
+
+                if generated_link:
+                    print(f"[*] Found Generated Link: {generated_link}")
+                    await page.goto(generated_link)
+                    continue
+
+                # Scroll a bit
+                await page.evaluate("window.scrollBy(0, 500)")
+                print("[*] Waiting for content...")
+                await page.wait_for_timeout(3000)
+
+        except Exception as e:
+            print(f"[!] Error: {e}")
+        finally:
+            await browser.close()
+
+if __name__ == "__main__":
+    url = "https://lksfy.com/xXias"
+    asyncio.run(solve_lksfy(url))
