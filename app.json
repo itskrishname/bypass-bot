@@ -1,0 +1,25 @@
+{
+  "name": "Lksfy Bypass Bot",
+  "description": "A Telegram bot to bypass lksfy.com links using Playwright.",
+  "keywords": [
+    "telegram",
+    "bot",
+    "bypass",
+    "playwright",
+    "python"
+  ],
+  "repository": "https://github.com/your-repo/lksfy-bypass-bot",
+  "stack": "container",
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Your Telegram Bot Token from @BotFather",
+      "required": true
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  }
+}
